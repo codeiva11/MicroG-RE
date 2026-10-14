@@ -515,13 +515,20 @@ public class GoogleMapImpl extends IGoogleMapDelegate.Stub
         boolean hasPermission = ContextCompat.checkSelfPermission(context, ACCESS_COARSE_LOCATION) == PERMISSION_GRANTED
                 || ContextCompat.checkSelfPermission(context, ACCESS_FINE_LOCATION) == PERMISSION_GRANTED;
         if (!hasPermission) {
-            throw new SecurityException("Neither " + ACCESS_COARSE_LOCATION + " nor " + ACCESS_FINE_LOCATION + " granted.");
+            Log.w(TAG, "Neither " + ACCESS_COARSE_LOCATION + " nor " + ACCESS_FINE_LOCATION + " granted, skipping MyLocation.");
+            return;
         }
-        LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-        if (myLocation) {
-            locationManager.requestLocationUpdates(5000, 10, criteria, listener, Looper.getMainLooper());
-        } else {
-            locationManager.removeUpdates(listener);
+        try {
+            LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+            if (locationManager != null) {
+                if (myLocation) {
+                    locationManager.requestLocationUpdates(5000, 10, criteria, listener, Looper.getMainLooper());
+                } else {
+                    locationManager.removeUpdates(listener);
+                }
+            }
+        } catch (SecurityException ex) {
+            Log.w(TAG, "SecurityException while requesting location updates: " + ex.getMessage());
         }
     }
 

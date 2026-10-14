@@ -40,6 +40,13 @@ jobs:
             echo "password=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_OUTPUT"
             echo "key_password=${{ secrets.KEYSTORE_ENTRY_PASSWORD }}" >> "$GITHUB_OUTPUT"
             echo "keystore_b64=${{ secrets.KEYSTORE_B64 }}" >> "$GITHUB_OUTPUT"
+          elif [ -f "keystore/public.jks" ]; then
+            echo "Using repository persistent keystore/public.jks..."
+            B64=$(base64 -w 0 keystore/public.jks)
+            echo "alias=public" >> "$GITHUB_OUTPUT"
+            echo "password=public" >> "$GITHUB_OUTPUT"
+            echo "key_password=public" >> "$GITHUB_OUTPUT"
+            echo "keystore_b64=$B64" >> "$GITHUB_OUTPUT"
           else
             echo "Generating automatic release keystore..."
             keytool -genkeypair -v -keystore release.jks -alias microg_re -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=MicroG-RE, O=Morphe, C=US" -storepass android -keypass android
