@@ -2,6 +2,10 @@ name: Release
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+*'
 
 jobs:
   build:
@@ -27,6 +31,25 @@ jobs:
         with:
           cache-encryption-key: ${{ secrets.GradleEncryptionKey }}
 
+      - name: "Setup Release Keystore"
+        id: setup_keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_B64 }}" ]; then
+            echo "Using repository secret keystore."
+            echo "alias=${{ secrets.KEYSTORE_ENTRY_ALIAS }}" >> "$GITHUB_OUTPUT"
+            echo "password=${{ secrets.KEYSTORE_PASSWORD }}" >> "$GITHUB_OUTPUT"
+            echo "key_password=${{ secrets.KEYSTORE_ENTRY_PASSWORD }}" >> "$GITHUB_OUTPUT"
+            echo "keystore_b64=${{ secrets.KEYSTORE_B64 }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Generating automatic release keystore..."
+            keytool -genkeypair -v -keystore release.jks -alias microg_re -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=MicroG-RE, O=Morphe, C=US" -storepass android -keypass android
+            B64=$(base64 -w 0 release.jks)
+            echo "alias=microg_re" >> "$GITHUB_OUTPUT"
+            echo "password=android" >> "$GITHUB_OUTPUT"
+            echo "key_password=android" >> "$GITHUB_OUTPUT"
+            echo "keystore_b64=$B64" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: "Build universal icon APK"
         run: "./gradlew --no-daemon :play-services-core:assembleDefaultRelease"
 
@@ -35,11 +58,11 @@ jobs:
         uses: ilharp/sign-android-release@v2
         with:
           releaseDir: play-services-core/build/outputs/apk/default/release
-          signingKey: ${{ secrets.KEYSTORE_B64 }}
-          keyAlias: ${{ secrets.KEYSTORE_ENTRY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEYSTORE_ENTRY_PASSWORD }}
-          buildToolsVersion: 37.0.0
+          signingKey: ${{ steps.setup_keystore.outputs.keystore_b64 }}
+          keyAlias: ${{ steps.setup_keystore.outputs.alias }}
+          keyStorePassword: ${{ steps.setup_keystore.outputs.password }}
+          keyPassword: ${{ steps.setup_keystore.outputs.key_password }}
+          buildToolsVersion: 35.0.0
 
       - name: "Compute version"
         id: version
@@ -63,11 +86,11 @@ jobs:
         uses: ilharp/sign-android-release@v2
         with:
           releaseDir: play-services-core/build/outputs/apk/default/release
-          signingKey: ${{ secrets.KEYSTORE_B64 }}
-          keyAlias: ${{ secrets.KEYSTORE_ENTRY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEYSTORE_ENTRY_PASSWORD }}
-          buildToolsVersion: 37.0.0
+          signingKey: ${{ steps.setup_keystore.outputs.keystore_b64 }}
+          keyAlias: ${{ steps.setup_keystore.outputs.alias }}
+          keyStorePassword: ${{ steps.setup_keystore.outputs.password }}
+          keyPassword: ${{ steps.setup_keystore.outputs.key_password }}
+          buildToolsVersion: 35.0.0
 
       - name: "Prepare ARM64 icon APK"
         run: |
@@ -81,11 +104,11 @@ jobs:
         uses: ilharp/sign-android-release@v2
         with:
           releaseDir: play-services-core/build/outputs/apk/default/release
-          signingKey: ${{ secrets.KEYSTORE_B64 }}
-          keyAlias: ${{ secrets.KEYSTORE_ENTRY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEYSTORE_ENTRY_PASSWORD }}
-          buildToolsVersion: 37.0.0
+          signingKey: ${{ steps.setup_keystore.outputs.keystore_b64 }}
+          keyAlias: ${{ steps.setup_keystore.outputs.alias }}
+          keyStorePassword: ${{ steps.setup_keystore.outputs.password }}
+          keyPassword: ${{ steps.setup_keystore.outputs.key_password }}
+          buildToolsVersion: 35.0.0
 
       - name: "Prepare ARMv7 icon APK"
         run: |
@@ -99,11 +122,11 @@ jobs:
         uses: ilharp/sign-android-release@v2
         with:
           releaseDir: play-services-core/build/outputs/apk/default/release
-          signingKey: ${{ secrets.KEYSTORE_B64 }}
-          keyAlias: ${{ secrets.KEYSTORE_ENTRY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEYSTORE_ENTRY_PASSWORD }}
-          buildToolsVersion: 37.0.0
+          signingKey: ${{ steps.setup_keystore.outputs.keystore_b64 }}
+          keyAlias: ${{ steps.setup_keystore.outputs.alias }}
+          keyStorePassword: ${{ steps.setup_keystore.outputs.password }}
+          keyPassword: ${{ steps.setup_keystore.outputs.key_password }}
+          buildToolsVersion: 35.0.0
 
       - name: "Prepare universal noicon APK"
         run: |
@@ -117,11 +140,11 @@ jobs:
         uses: ilharp/sign-android-release@v2
         with:
           releaseDir: play-services-core/build/outputs/apk/default/release
-          signingKey: ${{ secrets.KEYSTORE_B64 }}
-          keyAlias: ${{ secrets.KEYSTORE_ENTRY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEYSTORE_ENTRY_PASSWORD }}
-          buildToolsVersion: 37.0.0
+          signingKey: ${{ steps.setup_keystore.outputs.keystore_b64 }}
+          keyAlias: ${{ steps.setup_keystore.outputs.alias }}
+          keyStorePassword: ${{ steps.setup_keystore.outputs.password }}
+          keyPassword: ${{ steps.setup_keystore.outputs.key_password }}
+          buildToolsVersion: 35.0.0
 
       - name: "Prepare ARM64 noicon APK"
         run: |
@@ -135,11 +158,11 @@ jobs:
         uses: ilharp/sign-android-release@v2
         with:
           releaseDir: play-services-core/build/outputs/apk/default/release
-          signingKey: ${{ secrets.KEYSTORE_B64 }}
-          keyAlias: ${{ secrets.KEYSTORE_ENTRY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEYSTORE_ENTRY_PASSWORD }}
-          buildToolsVersion: 37.0.0
+          signingKey: ${{ steps.setup_keystore.outputs.keystore_b64 }}
+          keyAlias: ${{ steps.setup_keystore.outputs.alias }}
+          keyStorePassword: ${{ steps.setup_keystore.outputs.password }}
+          keyPassword: ${{ steps.setup_keystore.outputs.key_password }}
+          buildToolsVersion: 35.0.0
 
       - name: "Prepare ARMv7 noicon APK"
         run: |
@@ -148,13 +171,13 @@ jobs:
       - name: "List APKs"
         run: ls -lh dist/
 
-#      - name: "Create release"
-#        uses: softprops/action-gh-release@v2
-#        with:
-#          tag_name: v${{ steps.version.outputs.tag }}
-#          name: v${{ steps.version.outputs.version }}
-#          files: dist/*.apk
-#          generate_release_notes: true
+      - name: "Create release"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.tag }}
+          name: v${{ steps.version.outputs.version }}
+          files: dist/*.apk
+          generate_release_notes: true
 
       - name: "Upload APK (universal icon)"
         uses: actions/upload-artifact@v7

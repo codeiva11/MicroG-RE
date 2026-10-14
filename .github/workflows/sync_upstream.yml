@@ -1,0 +1,85 @@
+name: "Sync Upstream"
+
+on:
+  schedule:
+    # Runs twice every day (at 00:00 and 12:00 UTC)
+    - cron: '0 0,12 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: "Sync from Upstream"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: "Checkout fork repository"
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: "Configure Git identity"
+        run: |
+          git config --global user.name "codeiva11"
+          git config --global user.email "codeiva11@users.noreply.github.com"
+
+      - name: "Add and fetch upstream"
+        run: |
+          git remote add upstream https://github.com/MorpheApp/MicroG-RE.git || true
+          git fetch upstream dev --tags
+          git fetch upstream main || true
+
+      - name: "Merge upstream updates while preserving custom fixes"
+        id: merge_upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT_COMMIT=$(git rev-parse HEAD)
+          UPSTREAM_TARGET="upstream/dev"
+          
+          echo "Current HEAD: $CURRENT_COMMIT"
+          echo "Merging $UPSTREAM_TARGET into main..."
+          
+          # Attempt standard merge
+          if git merge "$UPSTREAM_TARGET" -m "chore: sync upstream changes"; then
+            echo "Clean merge completed."
+          else
+            echo "Merge conflicts encountered. Resolving while preserving our anti-adware fixes..."
+            
+            # Ensure SYSTEM_ALERT_WINDOW remains removed if upstream attempts to restore it
+            sed -i '/SYSTEM_ALERT_WINDOW/d' play-services-core/src/main/AndroidManifest.xml || true
+            sed -i '/SYSTEM_ALERT_WINDOW/d' firebase-auth/core/src/main/AndroidManifest.xml || true
+            
+            # Ensure legacy ReCaptchaOverlayService remains removed
+            rm -f firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/ReCaptchaOverlayService.kt || true
+            git rm -f firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/ReCaptchaOverlayService.kt || true
+            
+            # Remove overlay check from SelfCheckFragment if restored
+            git checkout --ours play-services-core/src/main/java/org/microg/gms/ui/SelfCheckFragment.java || true
+            git checkout --ours firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/FirebaseAuthService.kt || true
+            
+            git add -A
+            git commit -m "chore: sync upstream changes while preserving overlay & adware fixes" || true
+          fi
+          
+          NEW_COMMIT=$(git rev-parse HEAD)
+          if [ "$CURRENT_COMMIT" != "$NEW_COMMIT" ]; then
+            echo "New changes merged. Pushing to origin main..."
+            git push origin main
+            git push origin --tags
+            echo "has_updates=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No new updates found from upstream."
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "Trigger Release Workflow on new update"
+        if: steps.merge_upstream.outputs.has_updates == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering automated release build..."
+          gh workflow run release.yml --ref main || true
