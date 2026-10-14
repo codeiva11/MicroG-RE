@@ -3,9 +3,14 @@ name: Release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
       - '[0-9]+*'
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
 
 jobs:
   build:
