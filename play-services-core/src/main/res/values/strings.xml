@@ -256,6 +256,10 @@ Please set up a password, PIN, or pattern lock screen."</string>
     <string name="update_ignore">Ignore</string>
     <string name="update_downloading_title">Downloading update…</string>
     <string name="update_download_failed">Download failed. Check your connection and try again.</string>
+    <string name="update_ready_title">Install Update</string>
+    <string name="update_ready_message">MicroG-RE v%1$s has been downloaded in the background and is ready to install.\n\nYou have version v%2$s installed.\nPackage: %3$s\n\nTap \'Install\' to update instantly with zero wait time.</string>
+    <string name="update_ready_install">Install</string>
+    <string name="update_verification_failed">Update verification failed. The downloaded file could not be verified. Please try again.</string>
     <string name="update_signature_mismatch">App cannot be updated, signatures are different.</string>
     <string name="update_failed_title">Update failed</string>
     <string name="update_permission_required_title">Permission required</string>

@@ -64,7 +64,22 @@ jobs:
             git add -A
             git commit -m "chore: sync upstream changes while preserving overlay & adware fixes" || true
           fi
-          
+
+          # Keep the in-app updater pointed at our own fork releases. Our builds are
+          # signed with the fork key (tytydraco); an upstream (MorpheApp) signed APK
+          # would fail our own in-app signature check, so the updater must never
+          # silently revert to the upstream URL during a sync. This guard runs after
+          # every merge (clean or conflict-resolved), before the push decision: if the
+          # URL was restored, put it back and fold the fix into the sync commit.
+          # Deliberately NOT merge=ours on AppUpdater.kt: upstream updater
+          # improvements must keep flowing in; only the release-source URL is ours.
+          if grep -q 'MorpheApp/MicroG-RE' play-services-core/src/main/kotlin/org/microg/gms/ui/updater/AppUpdater.kt; then
+            echo "Upstream updater URL detected after merge, restoring fork URL..."
+            sed -i 's|MorpheApp/MicroG-RE|codeiva11/MicroG-RE|g' play-services-core/src/main/kotlin/org/microg/gms/ui/updater/AppUpdater.kt
+            git add play-services-core/src/main/kotlin/org/microg/gms/ui/updater/AppUpdater.kt
+            git commit -m "chore: keep in-app updater pointed at fork releases" || true
+          fi
+
           NEW_COMMIT=$(git rev-parse HEAD)
           if [ "$CURRENT_COMMIT" != "$NEW_COMMIT" ]; then
             echo "New changes merged. Pushing to origin main..."

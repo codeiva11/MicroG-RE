@@ -183,12 +183,22 @@ jobs:
       - name: "List APKs"
         run: ls -lh dist/
 
+      - name: "Generate SHA-256 sidecars"
+        run: |
+          cd dist
+          for apk in *.apk; do
+            sha256sum "$apk" > "$apk.sha256"
+          done
+          ls -lh
+
       - name: "Create release"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.tag }}
           name: v${{ steps.version.outputs.version }}
-          files: dist/*.apk
+          files: |
+            dist/*.apk
+            dist/*.sha256
           generate_release_notes: true
 
       - name: "Upload APK (universal icon)"

@@ -50,10 +50,14 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import org.microg.gms.ui.MainSettingsActivity
 import org.microg.gms.ui.updater.AppUpdater.UPDATE_COOLDOWN_MS
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
+import java.util.Locale
 import java.util.zip.ZipFile
 
 /**
@@ -68,18 +72,26 @@ object AppUpdater {
     /** Intent extra used by the update notification to force the update prompt. */
     const val EXTRA_CHECK_UPDATE = "extra_check_update"
 
-    private const val RELEASES_URL = "https://api.github.com/repos/MorpheApp/MicroG-RE/releases"
+    // Fork release source: our builds are signed with the fork key (tytydraco), so an
+    // upstream (MorpheApp) signed APK would fail our own signature check in
+    // launchInstaller and could never install as an update. The updater must check
+    // OUR releases, not upstream's. sync_upstream.yml re-applies this URL after
+    // every upstream sync so a merge can never silently restore the upstream one.
+    private const val RELEASES_URL = "https://api.github.com/repos/codeiva11/MicroG-RE/releases"
     private const val UPDATE_URL = "$RELEASES_URL/latest"
     private const val PREFS_NAME = "org.microg.gms_updater"
     private const val PREFS_IGNORED_VERSION = "ignored_version"
     private const val PREFS_LAST_CHECK = "last_check"
     private const val PREFS_NOTIF_ASKED = "notif_permission_asked"
+    // Version of the APK silently downloaded into SILENT_DOWNLOAD_FILE, if any.
+    private const val PREFS_CACHED_UPDATE_VERSION = "cached_update_version"
 
     private var pendingAction: ((Activity) -> Unit)? = null
     private var isLifecycleRegistered = false
     private var isAbiWarningShowing = false
     private var isUpdateDialogShowing = false
     private var isDownloadInProgress = false
+    private var isSilentDownloadInProgress = false
 
     /** Settings switch key (default SharedPreferences): include pre-release / dev builds. */
     const val PREFS_INCLUDE_PRERELEASE = "pref_include_prerelease"
@@ -89,6 +101,9 @@ object AppUpdater {
     private const val MAX_NOTES_LENGTH = 8000
     private const val DOWNLOAD_DIR = "updater"
     private const val DOWNLOAD_FILE = "microg-re-update.apk"
+    // Separate target for the silent background download, so a manual download
+    // (runUpdateFlow) can never race it on the same file.
+    private const val SILENT_DOWNLOAD_FILE = "microg-re-update-silent.apk"
     private const val USER_AGENT = "MicroG-RE-Updater"
     private const val TIMEOUT_MS = 15000
     private const val TAG = "AppUpdater"
@@ -170,16 +185,26 @@ object AppUpdater {
             val file = downloadUrlCancellable(url, File(activity.cacheDir, "$DOWNLOAD_DIR/$DOWNLOAD_FILE"), { isCancelled }) { conn ->
                 activeConnection = conn
             }
+            // Verify on this background thread (digest fetch needs network): a
+            // failed verification is treated like a failed download, and the
+            // bad file is deleted so it can never reach the installer.
+            val verifiedFile = if (file != null && isVerifiedUpdateApk(activity, file, update.assetUrl)) file else null
+            if (file != null && verifiedFile == null) {
+                Log.e(TAG, "Update download failed verification: $url")
+                file.delete()
+            }
             runOnUiThread(activity) {
                 dialog.dismiss()
                 isDownloadInProgress = false
                 if (isCancelled) return@runOnUiThread
-                if (file == null) {
+                if (verifiedFile == null) {
                     Log.e(TAG, "Update download failed: $url")
-                    showErrorDialog(activity, activity.getString(R.string.update_download_failed))
+                    val messageRes = if (file == null) R.string.update_download_failed
+                    else R.string.update_verification_failed
+                    showErrorDialog(activity, activity.getString(messageRes))
                 } else {
-                    Log.i(TAG, "Update downloaded: ${file.length()} bytes -> ${file.absolutePath}")
-                    launchInstaller(activity, file)
+                    Log.i(TAG, "Update downloaded: ${verifiedFile.length()} bytes -> ${verifiedFile.absolutePath}")
+                    launchInstaller(activity, verifiedFile)
                 }
             }
         }.start()
@@ -246,14 +271,15 @@ object AppUpdater {
             val isArm64 = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
             val assetFileName = if (isArm64) "microg-$cleanVersion-noicon-arm64-v8a.apk" else "microg-$cleanVersion-noicon.apk"
 
-            val directUrlTag = "https://github.com/MorpheApp/MicroG-RE/releases/download/$tag/$assetFileName"
-            val directUrlLatest = "https://github.com/MorpheApp/MicroG-RE/releases/latest/download/$assetFileName"
+            val directUrlTag = "https://github.com/codeiva11/MicroG-RE/releases/download/$tag/$assetFileName"
+            val directUrlLatest = "https://github.com/codeiva11/MicroG-RE/releases/latest/download/$assetFileName"
 
             if (!candidateUrls.contains(directUrlTag)) candidateUrls.add(directUrlTag)
             if (!candidateUrls.contains(directUrlLatest)) candidateUrls.add(directUrlLatest)
 
             val targetFile = File(activity.cacheDir, "$DOWNLOAD_DIR/microg-re-noicon-update.apk")
             var downloadedFile: File? = null
+            var downloadedUrl: String? = null
 
             for (url in candidateUrls) {
                 if (isCancelled) break
@@ -263,20 +289,31 @@ object AppUpdater {
                 }
                 if (file != null && file.length() > 0L) {
                     downloadedFile = file
+                    downloadedUrl = url
                     break
                 }
+            }
+
+            // Verify on this background thread (digest fetch needs network) before
+            // anything reaches the installer; delete a failed file outright.
+            val verifiedFile = if (downloadedFile != null && isVerifiedUpdateApk(activity, downloadedFile, downloadedUrl)) downloadedFile else null
+            if (downloadedFile != null && verifiedFile == null) {
+                Log.e(TAG, "No-icon variant download failed verification")
+                downloadedFile.delete()
             }
 
             runOnUiThread(activity) {
                 dialog.dismiss()
                 isDownloadInProgress = false
                 if (isCancelled) return@runOnUiThread
-                if (downloadedFile == null) {
+                if (verifiedFile == null) {
                     Log.e(TAG, "No-icon variant download failed for all candidate URLs")
-                    showErrorDialog(activity, activity.getString(R.string.update_download_failed))
+                    val messageRes = if (downloadedFile == null) R.string.update_download_failed
+                    else R.string.update_verification_failed
+                    showErrorDialog(activity, activity.getString(messageRes))
                 } else {
-                    Log.i(TAG, "No-icon variant downloaded: ${downloadedFile.length()} bytes -> ${downloadedFile.absolutePath}")
-                    launchInstaller(activity, downloadedFile)
+                    Log.i(TAG, "No-icon variant downloaded: ${verifiedFile.length()} bytes -> ${verifiedFile.absolutePath}")
+                    launchInstaller(activity, verifiedFile)
                 }
             }
         }.start()
@@ -353,9 +390,132 @@ object AppUpdater {
                         return@runOnUiThread
                     }
                 }
-                showUpdateDialog(activity, update)
+                if (!manual && !force) {
+                    // Automatic check (settings launch): download silently first and
+                    // only then offer the already-downloaded update, Photos-style.
+                    // Manual checks and notification taps keep the dialog-first flow.
+                    maybeSilentDownloadThenPrompt(activity, update)
+                } else {
+                    showUpdateDialog(activity, update)
+                }
             }
         }.start()
+    }
+
+    // -----------------------------------------------------------------------------------
+    // Silent background download (Photos-style): the automatic startup check downloads
+    // the update first, verifies it, and only then offers it. Install consent still
+    // happens twice (ready dialog + system installer) — silent download is never
+    // silent install. Downloads on Wi-Fi and mobile data alike; no network-type guard.
+    // -----------------------------------------------------------------------------------
+
+    private fun silentDownloadFile(activity: Activity): File =
+        File(activity.cacheDir, "$DOWNLOAD_DIR/$SILENT_DOWNLOAD_FILE")
+
+    /**
+     * Automatic-check entry point: if a verified APK for this exact version is already
+     * cached from an earlier silent download, offer it right away (re-verified first);
+     * otherwise start a silent download. A silent download already in progress falls
+     * back to the dialog-first flow so the user still gets an offer.
+     */
+    private fun maybeSilentDownloadThenPrompt(activity: Activity, update: UpdateInfo) {
+        if (isSilentDownloadInProgress || isDownloadInProgress) {
+            showUpdateDialog(activity, update)
+            return
+        }
+        val cached = silentDownloadFile(activity)
+        val cachedVersion = prefs(activity).getString(PREFS_CACHED_UPDATE_VERSION, null)
+        if (cached.exists() && cached.length() > 0L && cachedVersion == update.version) {
+            isSilentDownloadInProgress = true
+            Thread {
+                val verified = isVerifiedUpdateApk(activity, cached, update.assetUrl)
+                runOnUiThread(activity) {
+                    isSilentDownloadInProgress = false
+                    if (verified) {
+                        showReadyToInstallDialog(activity, update, cached)
+                    } else {
+                        Log.i(TAG, "Cached silent-download APK failed re-verification, re-downloading")
+                        cached.delete()
+                        prefs(activity).edit().remove(PREFS_CACHED_UPDATE_VERSION).apply()
+                        downloadSilentlyThenPrompt(activity, update)
+                    }
+                }
+            }.start()
+            return
+        }
+        downloadSilentlyThenPrompt(activity, update)
+    }
+
+    /** Downloads [update] with no UI, verifies it, then shows the ready dialog. */
+    private fun downloadSilentlyThenPrompt(activity: Activity, update: UpdateInfo) {
+        if (isSilentDownloadInProgress) return
+        isSilentDownloadInProgress = true
+        Thread {
+            val target = silentDownloadFile(activity)
+            // Drop a stale cached APK for a different version before downloading.
+            if (target.exists()) target.delete()
+            prefs(activity).edit().remove(PREFS_CACHED_UPDATE_VERSION).apply()
+            val file = downloadUrlCancellable(update.assetUrl, target, { false }) {}
+            if (file != null && isVerifiedUpdateApk(activity, file, update.assetUrl)) {
+                prefs(activity).edit().putString(PREFS_CACHED_UPDATE_VERSION, update.version).apply()
+                runOnUiThread(activity) {
+                    isSilentDownloadInProgress = false
+                    showReadyToInstallDialog(activity, update, file)
+                }
+            } else {
+                if (file != null) {
+                    Log.e(TAG, "Silent update download failed verification: ${update.assetUrl}")
+                    file.delete()
+                } else {
+                    Log.e(TAG, "Silent update download failed: ${update.assetUrl}")
+                }
+                prefs(activity).edit().remove(PREFS_CACHED_UPDATE_VERSION).apply()
+                runOnUiThread(activity) {
+                    isSilentDownloadInProgress = false
+                    // Silent download failed (network or verification): fall back to
+                    // the dialog-first flow so the user can still update manually.
+                    showUpdateDialog(activity, update)
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * Offers an already-downloaded, verified update for instant install. Reuses the
+     * update dialog layout with the notes and channel toggle hidden; the only actions
+     * are Install Now and Later. Install goes through launchInstaller, which re-checks
+     * the signature, and then the system installer — consent is never skipped.
+     */
+    private fun showReadyToInstallDialog(activity: Activity, update: UpdateInfo, file: File) {
+        if (activity.isFinishing) return
+        if (isUpdateDialogShowing || isDownloadInProgress || isAbiWarningShowing) return
+        isUpdateDialogShowing = true
+        val view = activity.layoutInflater.inflate(R.layout.dialog_update, null)
+        view.findViewById<android.widget.TextView>(R.id.update_title)
+            .setText(R.string.update_ready_title)
+        view.findViewById<android.widget.TextView>(R.id.update_message).text =
+            activity.getString(
+                R.string.update_ready_message,
+                update.version, BuildConfig.VERSION_NAME, update.assetName
+            )
+        view.findViewById<android.view.View>(R.id.update_notes_header).visibility = android.view.View.GONE
+        view.findViewById<android.widget.ScrollView>(R.id.update_notes_scroll).visibility = android.view.View.GONE
+        view.findViewById<android.view.View>(R.id.update_prerelease_row).visibility = android.view.View.GONE
+        val dialog = MaterialAlertDialogBuilder(activity)
+            .setView(view)
+            .setOnDismissListener { isUpdateDialogShowing = false }
+            .create()
+        val installButton =
+            view.findViewById<com.google.android.material.button.MaterialButton>(R.id.update_action_update)
+        installButton.setText(R.string.update_ready_install)
+        installButton.setOnClickListener {
+            dialog.dismiss()
+            launchInstaller(activity, file)
+        }
+        view.findViewById<android.view.View>(R.id.update_action_ignore).visibility = android.view.View.GONE
+        view.findViewById<com.google.android.material.button.MaterialButton>(R.id.update_action_cancel)
+            .setOnClickListener { dialog.dismiss() }
+        dialog.show()
     }
 
     /**
@@ -699,6 +859,86 @@ object AppUpdater {
             @Suppress("DEPRECATION")
             return pkgInfo?.signatures?.toList() ?: emptyList()
         }
+    }
+
+    // -----------------------------------------------------------------------------------
+    // SHA-256 digest verification (Photos-style): the release workflow publishes a
+    // `<apk>.sha256` sidecar next to every APK. The expected digest is fetched from
+    // `<apk download URL>.sha256`; the first token must be a 64-hex digest.
+    // -----------------------------------------------------------------------------------
+
+    private fun computeSha256(file: File): String? {
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            BufferedInputStream(FileInputStream(file), 131072).use { input ->
+                val buffer = ByteArray(131072)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            bytesToHex(digest.digest())
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun bytesToHex(bytes: ByteArray): String {
+        val hex = StringBuilder(bytes.size * 2)
+        for (b in bytes) hex.append(String.format(Locale.US, "%02x", b))
+        return hex.toString()
+    }
+
+    private fun fetchExpectedDigest(apkDownloadUrl: String): String? {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = URL("$apkDownloadUrl.sha256").openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.connectTimeout = TIMEOUT_MS
+            conn.readTimeout = TIMEOUT_MS
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) return null
+            val body = conn.inputStream.bufferedReader().use { it.readLine() } ?: return null
+            val token = body.trim().split("\\s+".toRegex())[0].lowercase(Locale.US)
+            if (token.matches(Regex("[0-9a-f]{64}"))) token else null
+        } catch (_: Exception) {
+            null
+        } finally {
+            try {
+                conn?.disconnect()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * Full verification gate for a downloaded update APK, run on a background thread
+     * (the digest fetch needs network) before anything reaches the installer:
+     * non-empty file + signature match (fail-closed, same as launchInstaller) +
+     * SHA-256 digest against the published sidecar when one exists (fail-closed on
+     * mismatch; fail-open only when no sidecar was published for that release, so
+     * older releases without sidecars still update).
+     */
+    private fun isVerifiedUpdateApk(context: Context, apkFile: File, apkDownloadUrl: String?): Boolean {
+        if (apkFile.length() <= 0L) {
+            Log.i(TAG, "Update APK failed validity check (empty file)")
+            return false
+        }
+        if (!checkSignaturesMatch(context, apkFile)) {
+            Log.i(TAG, "Update APK signature does not match installed app, rejecting")
+            return false
+        }
+        val expectedDigest = if (apkDownloadUrl != null) fetchExpectedDigest(apkDownloadUrl) else null
+        if (expectedDigest != null) {
+            val actualDigest = computeSha256(apkFile)
+            if (actualDigest == null || expectedDigest != actualDigest) {
+                Log.i(TAG, "Update APK digest mismatch, rejecting")
+                return false
+            }
+        } else {
+            Log.i(TAG, "No digest published for this update, signature check passed")
+        }
+        return true
     }
 
     private fun downloadUrlCancellable(
@@ -1165,12 +1405,13 @@ object AppUpdater {
             val tag = "v$cleanVersion"
             val fileName = directFileNameBuilder(cleanVersion, preferNoicon)
             listOf(
-                "https://github.com/MorpheApp/MicroG-RE/releases/download/$tag/$fileName",
-                "https://github.com/MorpheApp/MicroG-RE/releases/latest/download/$fileName"
+                "https://github.com/codeiva11/MicroG-RE/releases/download/$tag/$fileName",
+                "https://github.com/codeiva11/MicroG-RE/releases/latest/download/$fileName"
             ).forEach { if (!candidateUrls.contains(it)) candidateUrls.add(it) }
 
             val targetFile = File(activity.cacheDir, "$DOWNLOAD_DIR/microg-re-abi-update.apk")
             var downloadedFile: File? = null
+            var downloadedUrl: String? = null
             for (url in candidateUrls) {
                 if (isCancelled) break
                 Log.i(TAG, "Attempting ABI variant download from: $url")
@@ -1179,19 +1420,30 @@ object AppUpdater {
                 }
                 if (file != null && file.length() > 0L) {
                     downloadedFile = file
+                    downloadedUrl = url
                     break
                 }
+            }
+
+            // Verify on this background thread (digest fetch needs network) before
+            // anything reaches the installer; delete a failed file outright.
+            val verifiedFile = if (downloadedFile != null && isVerifiedUpdateApk(activity, downloadedFile, downloadedUrl)) downloadedFile else null
+            if (downloadedFile != null && verifiedFile == null) {
+                Log.e(TAG, "ABI variant download failed verification")
+                downloadedFile.delete()
             }
 
             runOnUiThread(activity) {
                 dialog.dismiss()
                 if (isCancelled) return@runOnUiThread
-                if (downloadedFile == null) {
+                if (verifiedFile == null) {
                     Log.e(TAG, "ABI variant download failed for all candidate URLs")
-                    showErrorDialog(activity, activity.getString(R.string.update_download_failed))
+                    val messageRes = if (downloadedFile == null) R.string.update_download_failed
+                    else R.string.update_verification_failed
+                    showErrorDialog(activity, activity.getString(messageRes))
                 } else {
-                    Log.i(TAG, "ABI variant downloaded: ${downloadedFile.length()} bytes")
-                    launchInstaller(activity, downloadedFile)
+                    Log.i(TAG, "ABI variant downloaded: ${verifiedFile.length()} bytes")
+                    launchInstaller(activity, verifiedFile)
                 }
             }
         }.start()
