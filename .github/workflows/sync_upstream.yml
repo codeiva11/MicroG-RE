@@ -60,7 +60,23 @@ jobs:
             # Remove overlay check from SelfCheckFragment if restored
             git checkout --ours play-services-core/src/main/java/org/microg/gms/ui/SelfCheckFragment.java || true
             git checkout --ours firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/FirebaseAuthService.kt || true
-            
+
+            # The fork deliberately deleted the Games overlay-popup code
+            # (AccountPromptManager + its GamesService call site). Upstream
+            # still carries it (dead code behind `if (false)`), so every sync
+            # conflicts here: keep the fork side.
+            git checkout --ours play-services-core/src/main/kotlin/org/microg/gms/games/GamesService.kt || true
+            git checkout --ours play-services-core/src/main/kotlin/org/microg/gms/games/utils/AccountPromptManager.kt || true
+
+            # Never commit conflict markers: if anything is still conflicted,
+            # abort the merge and fail loudly instead of pushing broken files.
+            if git ls-files --unmerged | grep -q .; then
+              echo "Unresolved conflicts remain:"
+              git ls-files --unmerged
+              git merge --abort
+              exit 1
+            fi
+
             git add -A
             git commit -m "chore: sync upstream changes while preserving overlay & adware fixes" || true
           fi
