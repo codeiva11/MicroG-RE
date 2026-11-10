@@ -13,7 +13,6 @@ jobs:
     permissions:
       contents: write
       actions: write
-      workflows: write
 
     steps:
       - name: "Checkout fork repository"
@@ -85,7 +84,6 @@ jobs:
           if [ "$CURRENT_COMMIT" != "$NEW_COMMIT" ]; then
             echo "New changes merged. Pushing to origin main..."
             git push origin main
-            git push origin --tags
             echo "has_updates=true" >> "$GITHUB_OUTPUT"
           else
             echo "No new updates found from upstream."
