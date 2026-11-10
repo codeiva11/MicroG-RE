@@ -22,6 +22,10 @@ class AccountPromptManager private constructor(context: Context) {
 
     private val appContextRef = WeakReference(context.applicationContext)
     private val handler = Handler(Looper.getMainLooper())
+<<<<<<< HEAD
+=======
+    private var windowManagerRef: WeakReference<WindowManager>? = null
+>>>>>>> upstream/dev
 
     private var promptViewRef: WeakReference<View>? = null
     private val removeRunnable = Runnable { remove() }
@@ -57,6 +61,36 @@ class AccountPromptManager private constructor(context: Context) {
 
         ImageManager.create(context).loadImage(avatarUrl, avatar)
 
+<<<<<<< HEAD
+=======
+        // RE changes start
+        // Upstream added the view to a system overlay window (TYPE_APPLICATION_OVERLAY).
+        // That is removed because SYSTEM_ALERT_WINDOW is not declared.
+        if (false) {
+            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            windowManagerRef = WeakReference(windowManager)
+
+            val layoutParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                if (SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = 80
+            }
+
+            try {
+                windowManager.addView(view, layoutParams)
+            } catch (e: Exception) {
+                Log.w(TAG, "windowManager addView failed ", e)
+            }
+        }
+        // RE changes end
+
+>>>>>>> upstream/dev
         fun prepare() {
             Log.d(TAG, "prepare")
             promptRoot.visibility = View.VISIBLE
@@ -97,6 +131,20 @@ class AccountPromptManager private constructor(context: Context) {
         Log.d(TAG, "remove")
         handler.removeCallbacksAndMessages(null)
 
+<<<<<<< HEAD
+=======
+        // RE changes start
+        if (false) {
+            promptViewRef?.get()?.let { view ->
+                try {
+                    windowManagerRef?.get()?.removeView(view)
+                } catch (_: Exception) {
+                }
+            }
+        }
+        // RE changes end
+
+>>>>>>> upstream/dev
         promptViewRef?.clear()
         promptViewRef = null
     }

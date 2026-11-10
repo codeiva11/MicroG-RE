@@ -10,7 +10,6 @@
          Using the RECEIVE_SMS permission can cause Play Protect to prevent installation.
          System alert can cause false positive warning on some vendor roms.
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     // RE changes end -->
 
     <application>
