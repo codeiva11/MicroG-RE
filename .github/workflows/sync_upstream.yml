@@ -126,4 +126,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Triggering automated release build..."
-          gh workflow run release.yml --ref main || true
+          # `gh` resolves the repo from the git remotes and, with an
+          # `upstream` remote present, targets the UPSTREAM repo
+          # (MorpheApp/MicroG-RE) — GITHUB_TOKEN has no access there, so
+          # the dispatch 403s. Pin the fork explicitly. No `|| true`:
+          # a failed dispatch must fail this step loudly, or the sync
+          # looks green while no release is ever built.
+          gh workflow run release.yml --repo codeiva11/MicroG-RE --ref main
