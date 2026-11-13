@@ -57,22 +57,28 @@ jobs:
             rm -f firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/ReCaptchaOverlayService.kt || true
             git rm -f firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/ReCaptchaOverlayService.kt || true
             
+            # Resolve a known conflict by keeping the fork side. NOTE:
+            # `git checkout --ours` only rewrites the worktree — it leaves
+            # the index stages unmerged, so the path must be `git add`ed
+            # too, or `git ls-files --unmerged` still lists it below.
+            resolve_ours() { git checkout --ours "$1" && git add "$1" || true; }
+
             # Remove overlay check from SelfCheckFragment if restored
-            git checkout --ours play-services-core/src/main/java/org/microg/gms/ui/SelfCheckFragment.java || true
-            git checkout --ours firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/FirebaseAuthService.kt || true
+            resolve_ours play-services-core/src/main/java/org/microg/gms/ui/SelfCheckFragment.java
+            resolve_ours firebase-auth/core/src/main/kotlin/org/microg/gms/firebase/auth/FirebaseAuthService.kt
 
             # The fork deliberately deleted the Games overlay-popup code
             # (AccountPromptManager + its GamesService call site). Upstream
             # still carries it (dead code behind `if (false)`), so every sync
             # conflicts here: keep the fork side.
-            git checkout --ours play-services-core/src/main/kotlin/org/microg/gms/games/GamesService.kt || true
-            git checkout --ours play-services-core/src/main/kotlin/org/microg/gms/games/utils/AccountPromptManager.kt || true
+            resolve_ours play-services-core/src/main/kotlin/org/microg/gms/games/GamesService.kt
+            resolve_ours play-services-core/src/main/kotlin/org/microg/gms/games/utils/AccountPromptManager.kt
 
             # The fork's release workflow is customised for the fork (own
             # keystore setup, push triggers, fork signing outputs). Upstream
             # reworked release.yml (version-bump + gh release create); taking
             # their version would drop the fork signing flow, so keep ours.
-            git checkout --ours .github/workflows/release.yml || true
+            resolve_ours .github/workflows/release.yml
 
             # Never commit conflict markers: if anything is still conflicted,
             # abort the merge and fail loudly instead of pushing broken files.
