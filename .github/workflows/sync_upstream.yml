@@ -68,12 +68,20 @@ jobs:
             git checkout --ours play-services-core/src/main/kotlin/org/microg/gms/games/GamesService.kt || true
             git checkout --ours play-services-core/src/main/kotlin/org/microg/gms/games/utils/AccountPromptManager.kt || true
 
+            # The fork's release workflow is customised for the fork (own
+            # keystore setup, push triggers, fork signing outputs). Upstream
+            # reworked release.yml (version-bump + gh release create); taking
+            # their version would drop the fork signing flow, so keep ours.
+            git checkout --ours .github/workflows/release.yml || true
+
             # Never commit conflict markers: if anything is still conflicted,
             # abort the merge and fail loudly instead of pushing broken files.
             if git ls-files --unmerged | grep -q .; then
               echo "Unresolved conflicts remain:"
               git ls-files --unmerged
-              git merge --abort
+              # The sed edits above can leave the index not uptodate, which
+              # makes `git merge --abort` fail; fall back to a hard reset.
+              git merge --abort || git reset --hard HEAD
               exit 1
             fi
 
